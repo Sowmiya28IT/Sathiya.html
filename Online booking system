@@ -1,0 +1,118 @@
+// server.js
+
+const express = require('express');
+const sqlite3 = require('sqlite3').verbose();
+const bodyParser = require('body-parser');
+const app = express();
+const PORT = 3000;
+
+// Middleware
+app.use(bodyParser.json());
+
+// In-memory SQLite DB (or use file: './database.db')
+const db = new sqlite3.Database(':memory:');
+
+// Create bookings table
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS bookings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    item TEXT,
+    date TEXT
+  )`);
+});
+
+// Serve the main HTML page
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Online Booking Store</title>
+      <style>
+        body { font-family: Arial; padding: 20px; background: #f4f4f4; }
+        input, button { margin: 10px 0; padding: 10px; width: 250px; font-size: 16px; }
+        button { background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+      </style>
+    </head>
+    <body>
+      <h1>Book a Service</h1>
+      <form id="bookingForm">
+        <input type="text" id="name" placeholder="Your Name" required><br>
+        <input type="text" id="item" placeholder="Item/Service" required><br>
+        <input type="date" id="date" required><br>
+        <button type="submit">Book Now</button>
+      </form>
+
+      <h2>All Bookings</h2>
+      <ul id="bookingsList"></ul>
+
+      <script>
+        // Submit booking
+        document.getElementById('bookingForm').addEventListener('submit', async function(e) {
+          e.preventDefault();
+          const name = document.getElementById('name').value;
+          const item = document.getElementById('item').value;
+          const date = document.getElementById('date').value;
+
+          const res = await fetch('/api/book', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, item, date })
+          });
+          const data = await res.json();
+          if (data.id) {
+            alert('Booking successful! ID: ' + data.id);
+            document.getElementById('bookingForm').reset();
+            loadBookings();
+          } else {
+            alert('Booking failed');
+          }
+        });
+
+        // Load bookings
+        async function loadBookings() {
+          const res = await fetch('/api/bookings');
+          const bookings = await res.json();
+          const list = document.getElementById('bookingsList');
+          list.innerHTML = '';
+          bookings.forEach(b => {
+            const li = document.createElement('li');
+            li.textContent = \`\${b.name} booked \${b.item} on \${b.date}\`;
+            list.appendChild(li);
+          });
+        }
+
+        loadBookings();
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// API to get bookings
+app.get('/api/bookings', (req, res) => {
+  db.all('SELECT * FROM bookings', (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+// API to book
+app.post('/api/book', (req, res) => {
+  const { name, item, date } = req.body;
+  if (!name || !item || !date) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+
+  const stmt = db.prepare('INSERT INTO bookings (name, item, date) VALUES (?, ?, ?)');
+  stmt.run(name, item, date, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ id: this.lastID });
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(\`Server running at http://localhost:\${PORT}\`);
+});
